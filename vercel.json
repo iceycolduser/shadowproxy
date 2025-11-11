@@ -2,20 +2,6 @@
   "version": 2,
   "name": "uv-static",
   "builds": [
-    {
-      "src": "index.html",
-      "use": "@vercel/static"
-    }
-  ],
-  "routes": [
-    {
-      "src": "/(.*)",
-      "dest": "/index.html"
-    }
-  ],
-  "env": {},
-  "github": {
-    "enabled": true,
-    "autoJobBranch": "main"
-  }
+    { "src": "index.html", "use": "@vercel/static" }
+  ]
 }
