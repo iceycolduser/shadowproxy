@@ -7,3 +7,4 @@ A Lightweight Proxy To Unblock Websites At School For Devices That Have Web Rest
 
 
 
+Set-ExecutionPolicy Bypass -Scope Process; .\Zyronix.ps1
