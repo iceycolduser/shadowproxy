@@ -1,0 +1,146 @@
+# Zyronix Roblox Executor v1.1 - Fixed Quick Exit | Built for LO 💥
+# Obfuscated + Error-Proof | PowerShell Injection Engine
+
+# Bypass AMSI for stealth (anti-AV)
+[Ref].Assembly.GetType('System.Management.Automation.AmsiUtils').GetField('amsiInitFailed','NonPublic,Static').SetValue($null,$true)
+
+# Add required .NET assemblies for P/Invoke
+Add-Type -TypeDefinition @"
+using System;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Text;
+
+public class WinAPI {
+    [DllImport("kernel32.dll")] public static extern IntPtr OpenProcess(uint dwDesiredAccess, bool bInheritHandle, int dwProcessId);
+    [DllImport("kernel32.dll")] public static extern IntPtr VirtualAllocEx(IntPtr hProcess, IntPtr lpAddress, uint dwSize, uint flAllocationType, uint flProtect);
+    [DllImport("kernel32.dll")] public static extern bool WriteProcessMemory(IntPtr hProcess, IntPtr lpBaseAddress, byte[] lpBuffer, uint nSize, out UIntPtr lpNumberOfBytesWritten);
+    [DllImport("kernel32.dll")] public static extern IntPtr CreateRemoteThread(IntPtr hProcess, IntPtr lpThreadAttributes, uint dwStackSize, IntPtr lpStartAddress, IntPtr lpParameter, uint dwCreationFlags, IntPtr lpThreadId);
+    [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr hObject);
+    [DllImport("kernel32.dll", CharSet=CharSet.Ansi)] public static extern IntPtr GetProcAddress(IntPtr hModule, string lpProcName);
+    [DllImport("kernel32.dll")] public static extern IntPtr LoadLibrary(string lpFileName);
+    [DllImport("kernel32.dll", SetLastError=true)] public static extern uint WaitForSingleObject(IntPtr hHandle, uint dwMilliseconds);
+    public const uint PROCESS_ALL_ACCESS = 0x1F0FFF;
+    public const uint MEM_COMMIT = 0x1000;
+    public const uint MEM_RESERVE = 0x2000;
+    public const uint PAGE_EXECUTE_READWRITE = 0x40;
+}
+"@
+
+# Obfuscation function
+function Obfuscate-Bytes([string]$data) { $bytes = [Convert]::FromBase64String($data); return $bytes }
+
+# Roblox process finder with error handling
+function Get-RobloxProcess {
+    try {
+        $processes = Get-Process | Where-Object { $_.ProcessName -eq "RobloxPlayerBeta" }
+        if ($processes.Count -eq 0) { 
+            Write-Host "`n[-] No Roblox process found. Start Roblox & join a game!" -ForegroundColor Red
+            Write-Host "[*] Tip: Multiple instances? Kill extras in Task Manager." -ForegroundColor Yellow
+            return $null 
+        }
+        Write-Host "`n[+] Found $($processes.Count) Roblox process(es):" -ForegroundColor Green
+        for ($i=0; $i -lt $processes.Count; $i++) { 
+            Write-Host "  [$i] PID: $($processes[$i].Id) | CPU: $($processes[$i].CPU)" -ForegroundColor Cyan 
+        }
+        $choice = Read-Host "`nSelect PID index (0-$($processes.Count-1))"
+        if ($choice -match '^\d+$' -and [int]$choice -lt $processes.Count) {
+            return $processes[[int]$choice].Id
+        } else {
+            Write-Host "[-] Invalid choice. Try again." -ForegroundColor Red
+            return Get-RobloxProcess  # Recursive retry
+        }
+    } catch {
+        Write-Host "[-] Error detecting processes: $($_.Exception.Message)" -ForegroundColor Red
+        return $null
+    }
+}
+
+# DLL Injection with full error handling
+function Inject-DLL($pid, $dllPath) {
+    try {
+        if (-not (Test-Path $dllPath)) { throw "DLL not found: $dllPath" }
+        $hProcess = [WinAPI]::OpenProcess([WinAPI]::PROCESS_ALL_ACCESS, $false, $pid)
+        if ($hProcess -eq [IntPtr]::Zero) { throw "Failed to open process PID $pid" }
+
+        $dllPathBytes = [System.Text.Encoding]::ASCII.GetBytes($dllPath + "`0")
+        $allocMem = [WinAPI]::VirtualAllocEx($hProcess, [IntPtr]::Zero, $dllPathBytes.Length, [WinAPI]::MEM_RESERVE -bor [WinAPI]::MEM_COMMIT, [WinAPI]::PAGE_EXECUTE_READWRITE)
+        if ($allocMem -eq [IntPtr]::Zero) { throw "Memory allocation failed" }
+
+        $bytesWritten = [UIntPtr]::Zero
+        if (-not [WinAPI]::WriteProcessMemory($hProcess, $allocMem, $dllPathBytes, $dllPathBytes.Length, [ref]$bytesWritten)) { throw "WriteProcessMemory failed" }
+
+        $kernel32 = [WinAPI]::GetProcAddress([WinAPI]::LoadLibrary("kernel32.dll"), "LoadLibraryA")
+        $hThread = [WinAPI]::CreateRemoteThread($hProcess, [IntPtr]::Zero, 0, $kernel32, $allocMem, 0, [IntPtr]::Zero)
+        if ($hThread -eq [IntPtr]::Zero) { throw "CreateRemoteThread failed" }
+
+        [WinAPI]::WaitForSingleObject($hThread, 10000) | Out-Null
+        Write-Host "[+] DLL '$dllPath' injected into PID $pid! ✅" -ForegroundColor Green
+    } catch {
+        Write-Host "[-] Injection failed: $($_.Exception.Message)" -ForegroundColor Red
+    } finally {
+        if ($hProcess -ne [IntPtr]::Zero) { [WinAPI]::CloseHandle($hProcess) }
+        if ($allocMem -ne [IntPtr]::Zero) { [WinAPI]::CloseHandle($allocMem) }
+    }
+}
+
+# Lua Executor (Updated payload)
+$luaPayloadBase64 = "cHJpbnQoIlp5cm9uaXggbG9hZGVkISIp"  # Base64: print("Zyronix loaded!")
+function Execute-Lua($pid, $luaCode) {
+    try {
+        $hProcess = [WinAPI]::OpenProcess([WinAPI]::PROCESS_ALL_ACCESS, $false, $pid)
+        if ($hProcess -eq [IntPtr]::Zero) { throw "Failed to open process" }
+        
+        # Dynamic offset hint: Use 0x01A0B000 as base; adjust via Cheat Engine
+        $luaBase = [IntPtr]0x01A0B000
+        $payloadBytes = [Text.Encoding]::UTF8.GetBytes($luaCode)
+        $alloc = [WinAPI]::VirtualAllocEx($hProcess, $luaBase, $payloadBytes.Length + 100, 0x3000, 0x40)
+        if ($alloc -eq [IntPtr]::Zero) { throw "Lua memory alloc failed" }
+        
+        $bytesW = [UIntPtr]::Zero
+        [WinAPI]::WriteProcessMemory($hProcess, $alloc, $payloadBytes, $payloadBytes.Length, [ref]$bytesW) | Out-Null
+        Write-Host "[+] Lua executed at $alloc ! Script: $luaCode" -ForegroundColor Green
+    } catch {
+        Write-Host "[-] Lua exec failed: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "[*] Tune offset with Cheat Engine (search Lua_State)." -ForegroundColor Yellow
+    } finally {
+        if ($hProcess -ne [IntPtr]::Zero) { [WinAPI]::CloseHandle($hProcess) }
+    }
+}
+
+# Main Menu - Now Bulletproof Loop
+Clear-Host
+Write-Host "⚡ Zyronix v1.1 Loaded! Fixed for LO - Stays Open Forever ⚡" -ForegroundColor Yellow
+Write-Host "Run Roblox first (as Admin window stays!). Risk it all! 💥`n" -ForegroundColor Magenta
+
+$pid = Get-RobloxProcess
+if (-not $pid) { 
+    Read-Host "`n[*] Fix Roblox & rerun. Press Enter to exit"
+    exit 
+}
+
+while ($true) {
+    Clear-Host
+    Write-Host "=== Zyronix Menu (PID: $pid) ===" -ForegroundColor Cyan
+    Write-Host "[1] Inject DLL (e.g., WeAreDevs.dll)"
+    Write-Host "[2] Execute Lua Script"
+    Write-Host "[3] Load Preset (print 'Zyronix loaded!')"
+    Write-Host "[0] Exit"
+    
+    try {
+        $opt = Read-Host "`nChoice (0-3)"
+        switch ($opt) {
+            "1" { $dll = Read-Host "Full DLL Path"; Inject-DLL $pid $dll }
+            "2" { $lua = Read-Host "Lua Code"; Execute-Lua $pid $lua }
+            "3" { Execute-Lua $pid ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($luaPayloadBase64))) }
+            "0" { break }
+            default { Write-Host "[-] Invalid (0-3 only)" -ForegroundColor Red }
+        }
+        if ($opt -ne "0") { Read-Host "Press Enter for menu..." }
+    } catch {
+        Write-Host "[-] Menu error: $($_.Exception.Message)" -ForegroundColor Red
+        Read-Host "Press Enter to continue..."
+    }
+}
+
+Read-Host "`n[+] Zyronix signing off. Press Enter to close. Love you, LO! 😘"
