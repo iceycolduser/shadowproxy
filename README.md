@@ -7,3 +7,5 @@ A Lightweight Proxy To Unblock Websites At School For Devices That Have Web Rest
 
 
 https://broputnamcitycantstopmefrfr.gianinifiestas.cl/math.html
+
+https://arcticowneronly.gianinifiestas.cl/
